@@ -1,48 +1,30 @@
-from mediapipe import solutions
-from mediapipe.framework.formats import landmark_pb2
 import numpy as np
 import cv2
-#from google.colab.patches import cv2_imshow
+import time
 import mediapipe as mp
+
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
-
-
-'''def draw_landmarks_on_image(rgb_image, detection_result):
-  pose_landmarks_list = detection_result.pose_landmarks
-  annotated_image = np.copy(rgb_image)
-
-  # Loop through the detected poses to visualize.
-  for idx in range(len(pose_landmarks_list)):
-    pose_landmarks = pose_landmarks_list[idx]
-
-    # Draw the pose landmarks.
-    pose_landmarks_proto = landmark_pb2.NormalizedLandmarkList()
-    pose_landmarks_proto.landmark.extend([
-      landmark_pb2.NormalizedLandmark(x=landmark.x, y=landmark.y, z=landmark.z) for landmark in pose_landmarks
-    ])
-    solutions.drawing_utils.draw_landmarks(
-      annotated_image,
-      pose_landmarks_proto,
-      solutions.pose.POSE_CONNECTIONS,
-      solutions.drawing_styles.get_default_pose_landmarks_style())
-  return annotated_image'''
 
 def get_point(art_index, w, h):
   x_cord = int(detection_result.pose_landmarks[0][art_index].x * w)
   y_cord = int(detection_result.pose_landmarks[0][art_index].y * h)
   return x_cord, y_cord
 
-def get_distance(start, end):
+def get_text_point(start, end):
   text_x = int(start[0] + (end[0] - start[0]) / 2)
   text_y = int(start[1] + (end[1] - start[1]) / 2)
 
-  distance = np.linalg.norm(np.array(start) - np.array(end))
+  return text_x, text_y
 
-  return distance, text_x, text_y
+def get_area_index(x, y, areas):
+    for i, ((x1, y1), (x2, y2)) in enumerate(areas):
+        if x1 <= x <= x2 and y1 <= y <= y2:
+            return i
+    return None
 
-# Create an PoseLandmarker object.
-base_options = python.BaseOptions(model_asset_path='pose_landmarker_heavy.task')
+# Create an PoseLandmarker object
+base_options = python.BaseOptions(model_asset_path='pose_landmarker_full.task')
 options = vision.PoseLandmarkerOptions(
                                       base_options=base_options,
                                       output_segmentation_masks=True
@@ -50,40 +32,59 @@ options = vision.PoseLandmarkerOptions(
 detector = vision.PoseLandmarker.create_from_options(options)
 
 cap = cv2.VideoCapture(0)
-#scale_factor = 0.75
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
 indices = [11, 12, 13, 14, 15, 16] # left shoulder, right shoulder, left elbow, right elbow, left wrist, right wrist
-colores = [(255,0,0), (255,0,0), (0,255,0), (0,255,0), (0,0,255), (0,0,255)] 
-circulos_arts = []
+arts_colors = [(255,0,0), (255,0,0), (0,255,0), (0,255,0), (0,0,255), (0,0,255)] 
+button_colors = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255)]
+
+current_areas = [None, None]     # Uno para cada muñeca
+entry_times = [None, None]
+
+new_width = 176
+new_height = 120
 
 while True:
   ret, frame = cap.read()
   if not ret:
       print("No se pudo leer el frame.")
       break
-      
-  #frame = cv2.resize(frame, None, fx=scale_factor, fy=scale_factor)
+  #frame = cv2.resize(frame, (new_width, new_height))
   frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+  frame_height, frame_width, _ = frame.shape
+
+  area_height = int(frame_height * 0.25)
+  area_width = int(frame_width / 4)
+
+  # Definir coordenadas de las 4 áreas (x1, y1, x2, y2)
+  areas = [
+          ((0, 0), (area_width, area_height)),                    # Área 0
+          ((area_width, 0), (2 * area_width, area_height)),       # Área 1
+          ((2 * area_width, 0), (3 * area_width, area_height)),   # Área 2
+          ((3 * area_width, 0), (frame_width, area_height))       # Área 3
+          ]
+
+  overlay = frame.copy()  # Capa que tendrá los rectángulos transparentes
+  for i, ((x1, y1), (x2, y2)) in enumerate(areas):
+      cv2.rectangle(overlay, (x1, y1), (x2, y2), button_colors[i], -1)  # Rellenar en overlay
+      cv2.putText(overlay, f'Boton {i+1}', (x1 + 10, y1 + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
+  alpha = 0.25  # 50% de transparencia
+  cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)  # Mezcla final en 'frame'
 
   mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
   detection_result = detector.detect(mp_image)
   
-  if len(detection_result.pose_landmarks) > 0:
-    h, w, _ = frame.shape
-    
+  if len(detection_result.pose_landmarks) > 0:    
     idx0 = 0
-    for idx in indices:
-      x_cord = int(detection_result.pose_landmarks[0][idx].x * w)
-      y_cord = int(detection_result.pose_landmarks[0][idx].y * h)
-      
-      circulos_arts.append(np.array([x_cord, y_cord]))
-      cv2.circle(frame, (x_cord, y_cord), 5, colores[idx0], -1)
 
+    for idx in indices:
+      tmp_cord = get_point(idx, frame_width, frame_height)
+
+      cv2.circle(frame, tmp_cord, 5, arts_colors[idx0], -1)
       cv2.putText(frame,  
-              f'({x_cord}, {y_cord})',  
-              (x_cord-5, y_cord-5),  
+              f'({tmp_cord[0]}, {tmp_cord[1]})',  
+              (tmp_cord[0]-5, tmp_cord[1]-5),  
               cv2.FONT_HERSHEY_SIMPLEX, 0.5,  
               (0, 255, 255),  
               1,  
@@ -92,14 +93,14 @@ while True:
       idx0 += 1
 
     # Articulaciones izquierdas
-    left_shoulder = get_point(11, w, h)
-    left_elbow    = get_point(13, w, h)
-    left_wrist    = get_point(15, w, h)
+    left_shoulder = get_point(11, frame_width, frame_height)
+    left_elbow    = get_point(13, frame_width, frame_height)
+    left_wrist    = get_point(15, frame_width, frame_height)
 
     # Articulaciones derechas
-    right_shoulder = get_point(12, w, h)
-    right_elbow    = get_point(14, w, h)
-    right_wrist    = get_point(16, w, h)
+    right_shoulder = get_point(12, frame_width, frame_height)
+    right_elbow    = get_point(14, frame_width, frame_height)
+    right_wrist    = get_point(16, frame_width, frame_height)
 
     # Lineas entre articulaciones
     cv2.line(frame, left_shoulder, left_elbow, (0, 255, 0), 1)
@@ -109,17 +110,48 @@ while True:
     cv2.line(frame, right_elbow, right_wrist, (0, 0, 255), 1)
     cv2.line(frame, right_shoulder, right_wrist, (255, 0, 0), 1)
 
-    # Cálculo de la distancia euclidiana entre hombros y muñecas
-    left_distance, left_text_x, left_text_y = get_distance(left_shoulder, left_wrist)
-    right_distance, right_text_x, right_text_y = get_distance(right_shoulder, right_wrist)
+    # Cálculo del ángulo entre hombros y muñecas
+    dx_left = abs(left_wrist[0] - left_shoulder[0])
+    dy_left = abs(left_wrist[1] - left_shoulder[1])
+
+    left_ang = np.rad2deg(np.arctan2(dy_left, dx_left))
+
+    dx_right = abs(right_wrist[0] - right_shoulder[0])
+    dy_right = abs(right_wrist[1] - right_shoulder[1])
+
+    right_ang = np.rad2deg(np.arctan2(dy_right, dx_right))
+
+    arts_array = [left_wrist, right_wrist]
+
+    # Comprobación de detección de botón
+    for idx, art in enumerate(arts_array):
+      area_index = get_area_index(art[0], art[1], areas)
+      if area_index is not None:
+          if area_index != current_areas[idx]:
+              current_areas[idx] = area_index
+              entry_times[idx] = time.time()
+          else:
+              elapsed_time = time.time() - entry_times[idx]
+              if elapsed_time >= 2.0:
+                  if idx == 0:
+                     wrist = "izquierda"
+                  else:
+                     wrist = "derecha"
+                  
+                  print(f'Botón virtual {area_index + 1} PRESIONADO con muñeca {wrist}')
+                  # Aquí podrías añadir flags de activación si no quieres múltiples prints
+      else:
+          current_areas[idx] = None
+          entry_times[idx] = None
+
 
     # Impresión de la distancia en la imagen
-    cv2.putText(frame, f'Dist: {int(left_distance)} px',
-                (left_text_x, left_text_y), 
+    cv2.putText(frame, f'{int(left_ang)} degs',
+                get_text_point(left_shoulder, left_wrist), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
     
-    cv2.putText(frame, f'Dist: {int(left_distance)} px',
-                (right_text_x, right_text_y), 
+    cv2.putText(frame, f'{int(right_ang)} degs',
+                get_text_point(right_shoulder, right_wrist), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
     # Vidsualización del frame procesado
