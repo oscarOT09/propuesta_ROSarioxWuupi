@@ -1,4 +1,4 @@
-# Importaciones originales
+# Importaciones necesarias
 import numpy as np
 import cv2
 import time
@@ -6,11 +6,11 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-# Importaciones para conexión con Unity
+# Conexión con Unity
 import socket
 import select
 
-#### Importaciones para la database
+# Manejo de archivos CSV
 import csv
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
@@ -18,16 +18,15 @@ import matplotlib.dates as mdates
 import pandas as pd
 
 # Crear socket UDP
-#IP = "127.0.0.1" 
 sock_botones = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-server_address_botones = ('localhost', 5005)  # Cambia IP si Unity corre en otro dispositivo
+server_address_botones = ('localhost', 5005)
 
 sock_video = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 video_address = ('localhost', 5053)
 MAX_DGRAM = 65000
 
 sock_log = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock_log.bind(('localhost', 5060))  # Socket adicional para escuchar a Unity
+sock_log.bind(('localhost', 5060))
 sock_log.setblocking(False)
 
 user_receive = False
@@ -54,16 +53,6 @@ def send_button_selection(index, wrist):
     message = f"{index},{wrist}"
     sock_botones.sendto(message.encode(), server_address_botones)
 
-def send_frame(frame):
-    # Codificar la imagen en formato JPEG
-    _, encoded = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-    data = encoded.tobytes()
-    
-    # Fragmentar si es necesario
-    for i in range(0, len(data), MAX_DGRAM):
-        chunk = data[i:i+MAX_DGRAM]
-        sock_video.sendto(chunk, video_address)
-
 def calcular_angulo(A, B, C):
     # Convertir puntos a vectores
     BA = np.array([A[0] - B[0], A[1] - B[1]])
@@ -82,15 +71,14 @@ def calcular_angulo(A, B, C):
     return angle_deg
 
 while not user_receive:
-    #data, _ = sock_log.recvfrom(1024)
     ready = select.select([sock_log], [], [], 0.1)  # Espera hasta 100ms
     if ready[0]:
       data, _ = sock_log.recvfrom(1024)
       message = data.decode()
-      print(f"[Socket Control] Mensaje recibido: {message}")
+      #print(f"[Socket Control] Mensaje recibido: {message}")
       if "user" in message.lower():
           user_receive = True
-          user_name = message.split(":")[-1].strip()  # Si viene como "user:juan"
+          user_name = message.split(":")[-1].strip()
       else:
           user_receive = True
           user_name = message.strip()
@@ -140,7 +128,6 @@ while True:
     print("No se pudo leer el frame.")
     break
   
-  #frame = cv2.resize(frame, (new_width, new_height))
   frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
   frame_height, frame_width, _ = frame.shape
 
@@ -221,10 +208,7 @@ while True:
                 wrist = "izquierda"
               else:
                 wrist = "derecha"
-              
-              #print(f'Botón virtual {area_index + 1} PRESIONADO con muñeca {wrist}')
               send_button_selection(area_index + 1, wrist)
-              # Aquí podrías añadir flags de activación si no quieres múltiples prints
       else:
           current_areas[idx] = None
           entry_times[idx] = None
@@ -232,7 +216,6 @@ while True:
     ###### Escritura en el CSV
     current_time = time.time()
     if (current_time - last_write_time) >= write_interval:
-        #now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         now = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
         with open(csv_filename, 'a', newline='') as csvfile:
             writer = csv.writer(csvfile)
@@ -240,7 +223,6 @@ while True:
             writer.writerow([now, "derecha", f"{right_ang:.2f}"])
         last_write_time = current_time
         print(f"Escritura existosa: {now}")
-
 
     # Impresión de la distancia en la imagen
     cv2.putText(frame, f'{int(left_ang)} degs',
@@ -251,21 +233,15 @@ while True:
                 get_text_point(right_shoulder, right_wrist), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-    # Vidsualización del frame procesado
-    
-    #cv2.imshow("Seleccion de botones | TEC PUE x Wuupi", frame)
-    
+    # Vidsualización del frame procesado    
     frame = cv2.resize(frame, (320, 240))
     _, img_encoded = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 50])
     data = img_encoded.tobytes()
-    #print(f"Enviando imagen codificada. Tamaño: {len(data)} bytes")
-
-    #send_frame(data)
+    # Envio del frame 
     for i in range(0, len(data), MAX_DGRAM):
       chunk = data[i:i+MAX_DGRAM]
       sock_video.sendto(chunk, video_address)
 
-    
     cv2.waitKey(1)
 
     try:
@@ -278,11 +254,6 @@ while True:
         # No hay datos disponibles; continuar con el ciclo normal
         pass
 
-    
-    # Salida con 'q'
-    '''if cv2.waitKey(1) & 0xFF == ord('q'):
-      break'''
-
 cv2.waitKey(0)
 cv2.destroyAllWindows()
 cap.release()
@@ -290,9 +261,7 @@ sock_botones.close()
 sock_log.close()
 sock_video.close()
 
-
-######################
-
+### Graficación
 # Cargar datos con pandas
 df = pd.read_csv(
     csv_filename,
@@ -304,16 +273,12 @@ df["angulo"] = pd.to_numeric(df["angulo"], errors='coerce')
 
 hoy = datetime.now().date()
 df_hoy = df[df["timestamp"].dt.date == hoy]
-#print("Número de registros hoy:", len(df_hoy))
-#print(df_hoy)
 
 df_hoy["angulo"] = pd.to_numeric(df_hoy["angulo"], errors='coerce')
 
 plt.figure(figsize=(12, 5))
 for lado in ["izquierda", "derecha"]:
     datos = df_hoy[df_hoy["lado"] == lado]
-    #print(f"Número de registros del lado: {lado}", len(datos))
-    #print(datos)
     plt.plot(datos["timestamp"], datos["angulo"], label=f"Codo {lado}")
 plt.title("Progreso de extensión del codo hoy")
 plt.xlabel("Hora")
@@ -325,7 +290,6 @@ plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
 
 plt.tight_layout()
 plt.grid()
-#plt.show()
 
 # --- Promedio últimos 7 días ---
 fecha_inicio = datetime.now().date() - timedelta(days=6)
